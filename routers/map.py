@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 import json
 import hashlib
-from client import prisma
+from db.client import prisma
 
 router = APIRouter()
 
@@ -18,7 +18,7 @@ async def initialize_map(user_name: str):
         # Prisma 연결
         try:
             await prisma.connect()
-            print('a')
+            print('Connected to Prisma')
         except Exception as e:
             if "Already connected" not in str(e):
                 raise e
@@ -29,13 +29,14 @@ async def initialize_map(user_name: str):
         # 1. 새 게임 생성
         new_game = await prisma.game.create(
             data={
-                "userName": user_name_hash,
+                "userName": user_name_hash,  # snake_case가 아닌 camelCase 사용
                 "mapRadius": 10,
                 "turnLimit": 50,
                 "createdAt": datetime.now()
             }
         )
-        print('b')
+        print('Created new game')
+        
         # 2. 문명 타입 생성 (7개 문명)
         civ_types = [
             {"name": "한국", "leaderName": "세종대왕", "personality": "Diplomat"},
@@ -49,26 +50,28 @@ async def initialize_map(user_name: str):
         
         created_civ_types = []
         for civ in civ_types:
-            civ_type = await prisma.civtype.create(  # CivType -> civtype
+            civ_type = await prisma.civtype.create(
                 data={
                     "name": civ["name"],
-                    "leaderName": civ["leaderName"],
+                    "leaderName": civ["leaderName"],  # leader_name이 아닌 leaderName 사용
                     "personality": civ["personality"]
                 }
             )
             created_civ_types.append(civ_type)
-        print('c')
+        print('Created civilization types')
+        
         # 3. 플레이어 문명 생성 (중앙에 위치)
-        player_civ = await prisma.gameciv.create(  # GameCiv -> gameciv
+        player_civ = await prisma.gameciv.create(
             data={
-                "gameId": new_game.id,
-                "civTypeId": created_civ_types[0].id,  # 한국
-                "isPlayer": True,
-                "startQ": 0,
-                "startR": 0
+                "gameId": new_game.id,  # game_id가 아닌 gameId 사용
+                "civTypeId": created_civ_types[0].id,  # civ_type_id가 아닌 civTypeId 사용
+                "isPlayer": True,  # is_player가 아닌 isPlayer 사용
+                "startQ": 0,  # start_q가 아닌 startQ 사용
+                "startR": 0   # start_r가 아닌 startR 사용
             }
         )
-        print('a')
+        print('Created player civilization')
+        
         # 4. AI 문명 생성 (플레이어와 14헥스 이상 거리)
         ai_civs = []
         for i, civ_type in enumerate(created_civ_types[1:], 1):
@@ -78,7 +81,7 @@ async def initialize_map(user_name: str):
             q = int(distance * math.cos(angle))
             r = int(distance * math.sin(angle))
             
-            ai_civ = await prisma.gameciv.create(  # GameCiv -> gameciv
+            ai_civ = await prisma.gameciv.create(
                 data={
                     "gameId": new_game.id,
                     "civTypeId": civ_type.id,
@@ -88,6 +91,7 @@ async def initialize_map(user_name: str):
                 }
             )
             ai_civs.append(ai_civ)
+            print(f'Created AI civilization {civ_type.name} at {q}, {r}')
         
         # 5. 맵 타일 생성 (반경 10의 육각형 맵)
         map_tiles = []
@@ -106,16 +110,13 @@ async def initialize_map(user_name: str):
                         resource_types = ["Food", "Production", "Gold", "Science"]
                         resource = random.choice(resource_types)
                     
-                    # Prisma enum 값으로 변환
-                    resource_enum = getattr(prisma.ResourceType, resource)
-                    
-                    map_tile = await prisma.maptile.create(  # MapTile -> maptile
+                    map_tile = await prisma.maptile.create(
                         data={
                             "gameId": new_game.id,
                             "q": q,
                             "r": r,
                             "terrain": terrain,
-                            "resource": resource_enum
+                            "resource": resource
                         }
                     )
                     map_tiles.append(map_tile)
@@ -123,12 +124,12 @@ async def initialize_map(user_name: str):
         # 6. 플레이어 도시 생성
         player_city = await prisma.city.create(
             data={
-                "gameCivId": player_civ.id,
+                "gameCivId": player_civ.id,  # game_civ_id가 아닌 gameCivId 사용
                 "name": "서울",
                 "q": 0,
                 "r": 0,
                 "population": 1,
-                "createdTurn": 1
+                "createdTurn": 1  # created_turn이 아닌 createdTurn 사용
             }
         )
         
@@ -147,27 +148,28 @@ async def initialize_map(user_name: str):
             )
         
         # 8. 기술 트리 선택 (플레이어)
-        await prisma.treeselection.create(  # TreeSelection -> treeselection
+        await prisma.treeselection.create(
             data={
                 "gameCivId": player_civ.id,
-                "treeType": "군사",
-                "isMain": True
+                "treeType": "군사",  # tree_type이 아닌 treeType 사용
+                "isMain": True  # is_main이 아닌 isMain 사용
             }
         )
-        
+        print('Created player tree selection',new_game.id)
         # 9. 턴 스냅샷 생성
-        await prisma.turnsnapshot.create(  # TurnSnapshot -> turnsnapshot
+        await prisma.turnsnapshot.create(
             data={
-                "gameId": new_game.id,
+                "id": new_game.id,
+                "game": {"connect": {"id": new_game.id}},
                 "turnNumber": 1,
                 "civId": player_civ.id,
-                "observedMap": {"tiles": [{"q": t.q, "r": t.r, "terrain": t.terrain, "resource": t.resource.value} for t in map_tiles]},
-                "researchState": {"current": None, "queue": []},
-                "productionState": {"current": None, "queue": []},
-                "diplomacyState": {"relations": {}}
+                "observedMap": json.dumps({"tiles": [{"q": t.q, "r": t.r, "terrain": t.terrain, "resource": t.resource} for t in map_tiles]}),
+                "researchState": json.dumps({"current": None, "queue": []}),
+                "productionState": json.dumps({"current": None, "queue": []}),
+                "diplomacyState": json.dumps({"relations": {}})
             }
         )
-        
+        print('Created turn snapshot')
         # 성공 응답 반환
         return {
             "success": True,
@@ -196,6 +198,7 @@ async def initialize_map(user_name: str):
                 "detail": str(e)
             }
         }
+    
 
 @router.get("/data", summary="맵 데이터 조회", response_description="맵 데이터 반환")
 async def get_map_data(game_id: Optional[int] = Query(None, description="게임 ID")):

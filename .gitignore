@@ -1,3 +1,14 @@
 node_modules
 # Keep environment variables out of version control
 .env
+migrations
+prisma/migrations
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/*.pyw
+**/*.pyz
+**/*.pywz
+**/*.pyz
+
+**__pycache__**

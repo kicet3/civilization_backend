@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider             = "prisma-client-py"
+  recursive_type_depth = 5
 }
 
 datasource db {
@@ -12,7 +13,7 @@ model Game {
   createdAt     DateTime       @default(now())
   mapRadius     Int
   turnLimit     Int
-  userName      String         @db.VarChar(50)
+  userName      String         @db.VarChar(100)
   gameCivs      GameCiv[]
   mapTiles      MapTile[]
   turnSnapshots TurnSnapshot[]
@@ -20,9 +21,9 @@ model Game {
 
 model CivType {
   id            Int             @id @default(autoincrement())
-  name          String          @db.VarChar(50)
+  name          String          @db.VarChar(100)
   personality   PersonalityType
-  leaderName    String          @db.VarChar(50)
+  leaderName    String          @db.VarChar(100)
   gameCivs      GameCiv[]
   leaderProfile LeaderProfile?
 }
@@ -53,7 +54,7 @@ model GameCiv {
 model MapTile {
   q        Int
   r        Int
-  terrain  String       @db.VarChar(20)
+  terrain  String       @db.VarChar(100)
   resource ResourceType
   gameId   BigInt
   game     Game         @relation(fields: [gameId], references: [id])
@@ -63,7 +64,7 @@ model MapTile {
 
 model City {
   id              BigInt            @id @default(autoincrement())
-  name            String            @db.VarChar(50)
+  name            String            @db.VarChar(100)
   q               Int
   r               Int
   population      Int
@@ -78,12 +79,12 @@ model City {
 
 model Technology {
   id                   Int                 @id @default(autoincrement())
-  name                 String              @db.VarChar(50)
+  name                 String              @db.VarChar(100)
   description          String              @db.Text
   era                  EraType
   researchCost         Int
   researchTimeModifier Float
-  treeType             String              @db.VarChar(50)
+  treeType             String              @db.VarChar(100)
   buildings            Building[]
   gameCivTechnologies  GameCivTechnology[]
   prerequisiteFor      Prerequisite[]      @relation("PrereqTech")
@@ -123,7 +124,7 @@ model TreeSelection {
   gameCivId  BigInt
   isMain     Boolean
   selectedAt DateTime @default(now())
-  treeType   String   @db.VarChar(50)
+  treeType   String   @db.VarChar(100)
   gameCiv    GameCiv  @relation(fields: [gameCivId], references: [id])
 
   @@index([gameCivId], map: "TreeSelection_gameCivId_fkey")
@@ -144,7 +145,7 @@ model ResearchQueue {
 
 model UnitType {
   id           Int          @id @default(autoincrement())
-  name         String       @db.VarChar(50)
+  name         String       @db.VarChar(100)
   category     UnitCategory
   era          EraType
   maintenance  Int
@@ -190,8 +191,8 @@ model ProductionQueue {
 
 model Building {
   id                 Int              @id @default(autoincrement())
-  name               String           @db.VarChar(50)
-  category           String           @db.VarChar(50)
+  name               String           @db.VarChar(100)
+  category           String           @db.VarChar(100)
   description        String           @db.Text
   buildTime          Int
   maintenanceCost    Int
