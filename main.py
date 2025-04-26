@@ -29,9 +29,9 @@ logging.basicConfig(
 # 라우터 등록
 app.include_router(game.router, prefix="/game", tags=["Game"])
 app.include_router(map.router, prefix="/map", tags=["Map"])
-app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
-app.include_router(research.router, prefix="/research", tags=["Research"])
-app.include_router(city.router, prefix="/city", tags=["City"])
+# app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
+# app.include_router(research.router, prefix="/research", tags=["Research"])
+# app.include_router(city.router, prefix="/city", tags=["City"])
 
 @app.on_event("startup")
 async def startup():
