@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import game, map, websocket, research, city
-from core.config import Settings, prisma_client
 import uvicorn
 import os
 import logging
+from db.client import prisma
+
 
 app = FastAPI(title="Civilization LLM Game API")
 
@@ -26,6 +27,15 @@ logging.basicConfig(
     ]
 )
 
+# Prisma 초기화 이벤트 핸들러
+@app.on_event("startup")
+async def startup_event():
+    await prisma.connect()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await prisma.disconnect()
+
 # 라우터 등록
 app.include_router(game.router, prefix="/game", tags=["Game"])
 app.include_router(map.router, prefix="/map", tags=["Map"])
@@ -33,17 +43,7 @@ app.include_router(map.router, prefix="/map", tags=["Map"])
 # app.include_router(research.router, prefix="/research", tags=["Research"])
 # app.include_router(city.router, prefix="/city", tags=["City"])
 
-@app.on_event("startup")
-async def startup():
-    await prisma_client.connect()
-
-@app.on_event("shutdown")
-async def shutdown():
-    await prisma_client.disconnect()
 
 @app.get("/")
 async def root():
     return {"message": "Welcome to Civilization LLM Game API"}
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

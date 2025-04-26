@@ -1,8 +1,5 @@
 generator client {
-  provider                    = "prisma-client-py"
-  recursive_type_depth        = "5"
-  interface                   = "asyncio"
-  enable_experimental_decimal = "true"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -11,415 +8,347 @@ datasource db {
 }
 
 model Game {
-  id          String      @id @db.Char(36)
-  userId      String      @db.VarChar(100)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  currentTurn Int         @default(1)
-  mapType     String      @db.VarChar(50)
-  width       Int
-  height      Int
-  gameStates  GameState[]
+  id            BigInt         @id @default(autoincrement())
+  createdAt     DateTime       @default(now())
+  mapRadius     Int
+  turnLimit     Int
+  userName      String         @db.VarChar(50)
+  gameCivs      GameCiv[]
+  mapTiles      MapTile[]
+  turnSnapshots TurnSnapshot[]
 }
 
-model GameState {
-  id        Int      @id @default(autoincrement())
-  gameId    String   @db.Char(36)
-  turn      Int
-  stateData Json
-  createdAt DateTime @default(now())
-  game      Game     @relation(fields: [gameId], references: [id])
-
-  @@index([gameId, turn])
+model CivType {
+  id            Int             @id @default(autoincrement())
+  name          String          @db.VarChar(50)
+  personality   PersonalityType
+  leaderName    String          @db.VarChar(50)
+  gameCivs      GameCiv[]
+  leaderProfile LeaderProfile?
 }
 
-model User {
-  id            Int           @id @default(autoincrement())
-  username      String        @unique @db.VarChar(50)
-  password_hash String        @db.Text
-  created_at    DateTime      @db.DateTime(0)
-  game_sessions GameSession[] @relation("HostedGames")
-  players       Player[]
+model GameCiv {
+  id                BigInt              @id @default(autoincrement())
+  civTypeId         Int
+  gameId            BigInt
+  isPlayer          Boolean
+  startQ            Int
+  startR            Int
+  adviceRequests    AdviceRequest[]
+  cities            City[]
+  receivedSessions  DiplomacySession[]  @relation("TargetCiv")
+  diplomacySessions DiplomacySession[]  @relation("InitiatorCiv")
+  civType           CivType             @relation(fields: [civTypeId], references: [id])
+  game              Game                @relation(fields: [gameId], references: [id])
+  technologies      GameCivTechnology[]
+  units             GameUnit[]
+  buildings         PlayerBuilding[]
+  researchQueues    ResearchQueue[]
+  treeSelections    TreeSelection[]
+
+  @@index([civTypeId], map: "GameCiv_civTypeId_fkey")
+  @@index([gameId], map: "GameCiv_gameId_fkey")
 }
 
-model Tech {
-  id                String             @id @db.VarChar(50)
-  name              String             @db.VarChar(100)
-  era               String?            @db.VarChar(50)
-  cost              Int
-  description       String?            @db.Text
-  game_research     GameResearch[]
-  research_progress ResearchProgress[]
-  researched_techs  ResearchedTech[]
-  prerequisites     TechPrerequisite[] @relation("PrereqRelation")
-  dependents        TechPrerequisite[] @relation("DependentRelation")
-}
+model MapTile {
+  q        Int
+  r        Int
+  terrain  String       @db.VarChar(20)
+  resource ResourceType
+  gameId   BigInt
+  game     Game         @relation(fields: [gameId], references: [id])
 
-model TechPrerequisite {
-  techId   String
-  prereqId String
-  prereq   Tech   @relation("PrereqRelation", fields: [prereqId], references: [id])
-  tech     Tech   @relation("DependentRelation", fields: [techId], references: [id])
-
-  @@id([techId, prereqId])
-  @@index([prereqId], map: "TechPrerequisite_prereqId_fkey")
-}
-
-model Policy {
-  id               String          @id @db.VarChar(50)
-  name             String          @db.VarChar(100)
-  tree             String          @db.VarChar(50)
-  culture_cost     Int
-  effect_json      Json?
-  adopted_policies AdoptedPolicy[]
-}
-
-model Doctrine {
-  id                 String             @id @db.VarChar(50)
-  name               String             @db.VarChar(100)
-  tier               Int
-  effect_json        Json?
-  selected_doctrines SelectedDoctrine[]
-}
-
-model UnitType {
-  id              String  @id @db.VarChar(50)
-  name            String  @db.VarChar(100)
-  category        String? @db.VarChar(50)
-  move            Int?
-  combat_strength Int?
-  range           Int?
-  productionCost  Int     @default(1)
-  units           Unit[]
-}
-
-model BuildingType {
-  id             String  @id @db.VarChar(50)
-  name           String  @db.VarChar(100)
-  era            String? @db.VarChar(50)
-  productionCost Int
-  effectJson     Json?
-  cities         City[]  @relation("CityBuildings")
-}
-
-model Terrain {
-  id         String    @id @db.VarChar(50)
-  name       String    @db.VarChar(100)
-  yield_json Json?
-  hexagons   Hexagon[]
-}
-
-model MapSeed {
-  id              String       @id @default(uuid()) @db.Char(36)
-  gameMode        String       @db.VarChar(50)
-  difficulty      String       @db.VarChar(50)
-  civilization    String       @db.VarChar(50)
-  mapType         String       @db.VarChar(50)
-  civCount        Int          @default(6)
-  seed            BigInt
-  created_at      DateTime     @default(now())
-  game_session_id String?      @unique @db.Char(36)
-  game_session    GameSession? @relation(fields: [game_session_id], references: [id])
-
-  @@unique([gameMode, difficulty, civilization, mapType, civCount], name: "ux_map_seed_config")
-}
-
-model Resource {
-  id       String    @id @db.VarChar(50)
-  name     String    @db.VarChar(100)
-  type     String    @db.VarChar(50)
-  hexagons Hexagon[]
-}
-
-model Hexagon {
-  session_id   String      @db.Char(36)
-  q            Int
-  r            Int
-  s            Int
-  terrain_id   String?     @db.VarChar(50)
-  resource_id  String?     @db.VarChar(50)
-  city_id      Int?
-  unit_id      Int?
-  resource     Resource?   @relation(fields: [resource_id], references: [id])
-  game_session GameSession @relation(fields: [session_id], references: [id])
-  terrain      Terrain?    @relation(fields: [terrain_id], references: [id])
-
-  @@id([session_id, q, r, s])
-  @@index([resource_id], map: "Hexagon_resource_id_fkey")
-  @@index([terrain_id], map: "Hexagon_terrain_id_fkey")
+  @@id([gameId, q, r])
 }
 
 model City {
-  id                     Int               @id @default(autoincrement())
-  session_id             String            @db.Char(36)
-  name                   String            @db.VarChar(100)
-  owner_player_id        Int
-  population             Int
-  turns_left             Int?
-  food                   Int?
-  gold                   Int?
-  production             Int?
-  science                Int?
-  culture                Int?
-  faith                  Int?
-  happiness              Int?
-  hp                     Int?
-  defense                Int?
-  garrisoned_unit_id     Int?
-  food_to_next_pop       Int?
-  culture_to_next_border Int?
-  specialization         String?           @db.VarChar(50)
-  updated_at             DateTime          @updatedAt
-  loc_q                  Int?
-  loc_r                  Int?
-  loc_s                  Int?
-  owner                  Player            @relation(fields: [owner_player_id], references: [id])
-  game_session           GameSession       @relation(fields: [session_id], references: [id])
-  production_queue       ProductionQueue[]
-  buildings              BuildingType[]    @relation("CityBuildings")
+  id              BigInt            @id @default(autoincrement())
+  name            String            @db.VarChar(50)
+  q               Int
+  r               Int
+  population      Int
+  createdTurn     Int
+  gameCivId       BigInt
+  gameCiv         GameCiv           @relation(fields: [gameCivId], references: [id])
+  buildings       PlayerBuilding[]
+  productionQueue ProductionQueue[]
 
-  @@index([owner_player_id], map: "City_owner_player_id_fkey")
-  @@index([session_id], map: "City_session_id_fkey")
+  @@index([gameCivId], map: "City_gameCivId_fkey")
+}
+
+model Technology {
+  id                   Int                 @id @default(autoincrement())
+  name                 String              @db.VarChar(50)
+  description          String              @db.Text
+  era                  EraType
+  researchCost         Int
+  researchTimeModifier Float
+  treeType             String              @db.VarChar(50)
+  buildings            Building[]
+  gameCivTechnologies  GameCivTechnology[]
+  prerequisiteFor      Prerequisite[]      @relation("PrereqTech")
+  prerequisites        Prerequisite[]      @relation("CurrentTech")
+  researchQueues       ResearchQueue[]
+  unitTypes            UnitType[]
+}
+
+model Prerequisite {
+  id       BigInt     @id @default(autoincrement())
+  prereqId Int
+  techId   Int
+  prereq   Technology @relation("PrereqTech", fields: [prereqId], references: [id])
+  tech     Technology @relation("CurrentTech", fields: [techId], references: [id])
+
+  @@index([prereqId], map: "Prerequisite_prereqId_fkey")
+  @@index([techId], map: "Prerequisite_techId_fkey")
+}
+
+model GameCivTechnology {
+  id             BigInt         @id @default(autoincrement())
+  status         ResearchStatus
+  completedAt    DateTime?
+  gameCivId      BigInt
+  progressPoints Int            @default(0)
+  startedAt      DateTime?
+  techId         Int
+  gameCiv        GameCiv        @relation(fields: [gameCivId], references: [id])
+  technology     Technology     @relation(fields: [techId], references: [id])
+
+  @@index([gameCivId], map: "GameCivTechnology_gameCivId_fkey")
+  @@index([techId], map: "GameCivTechnology_techId_fkey")
+}
+
+model TreeSelection {
+  id         BigInt   @id @default(autoincrement())
+  gameCivId  BigInt
+  isMain     Boolean
+  selectedAt DateTime @default(now())
+  treeType   String   @db.VarChar(50)
+  gameCiv    GameCiv  @relation(fields: [gameCivId], references: [id])
+
+  @@index([gameCivId], map: "TreeSelection_gameCivId_fkey")
+}
+
+model ResearchQueue {
+  id            BigInt     @id @default(autoincrement())
+  addedAt       DateTime   @default(now())
+  gameCivId     BigInt
+  queuePosition Int
+  techId        Int
+  gameCiv       GameCiv    @relation(fields: [gameCivId], references: [id])
+  technology    Technology @relation(fields: [techId], references: [id])
+
+  @@index([gameCivId], map: "ResearchQueue_gameCivId_fkey")
+  @@index([techId], map: "ResearchQueue_techId_fkey")
+}
+
+model UnitType {
+  id           Int          @id @default(autoincrement())
+  name         String       @db.VarChar(50)
+  category     UnitCategory
+  era          EraType
+  maintenance  Int
+  movement     Int
+  sight        Int
+  buildTime    Int
+  prereqTechId Int?
+  gameUnits    GameUnit[]
+  prereqTech   Technology?  @relation(fields: [prereqTechId], references: [id])
+
+  @@index([prereqTechId], map: "UnitType_prereqTechId_fkey")
+}
+
+model GameUnit {
+  id             BigInt   @id @default(autoincrement())
+  q              Int
+  r              Int
+  hp             Int
+  moved          Boolean  @default(false)
+  createdTurn    Int
+  gameCivId      BigInt
+  promotionLevel Int      @default(0)
+  unitTypeId     Int
+  gameCiv        GameCiv  @relation(fields: [gameCivId], references: [id])
+  unitType       UnitType @relation(fields: [unitTypeId], references: [id])
+
+  @@index([gameCivId], map: "GameUnit_gameCivId_fkey")
+  @@index([unitTypeId], map: "GameUnit_unitTypeId_fkey")
 }
 
 model ProductionQueue {
-  id          Int    @id @default(autoincrement())
-  city_id     Int
-  turns_left  Int
-  queue_order Int
-  itemId      String @db.VarChar(50)
-  itemType    String @db.VarChar(10)
-  city        City   @relation(fields: [city_id], references: [id])
+  id         BigInt   @id @default(autoincrement())
+  addedAt    DateTime @default(now())
+  cityId     BigInt
+  itemId     Int
+  itemType   ItemType
+  queueOrder Int
+  turnsLeft  Int
+  city       City     @relation(fields: [cityId], references: [id])
 
-  @@index([city_id], map: "ProductionQueue_city_id_fkey")
+  @@index([cityId], map: "ProductionQueue_cityId_fkey")
 }
 
-model Unit {
-  id              Int         @id @default(autoincrement())
-  session_id      String      @db.Char(36)
-  owner_player_id Int
-  unit_type_id    String      @db.VarChar(50)
-  hp              Int?
-  movement        Int?
-  max_movement    Int?
-  status          String?     @db.VarChar(50)
-  loc_q           Int?
-  loc_r           Int?
-  loc_s           Int?
-  owner           Player      @relation(fields: [owner_player_id], references: [id])
-  game_session    GameSession @relation(fields: [session_id], references: [id])
-  unit_type       UnitType    @relation(fields: [unit_type_id], references: [id])
+model Building {
+  id                 Int              @id @default(autoincrement())
+  name               String           @db.VarChar(50)
+  category           String           @db.VarChar(50)
+  description        String           @db.Text
+  buildTime          Int
+  maintenanceCost    Int
+  prerequisiteTechId Int?
+  resourceCost       Int
+  buildQueues        BuildQueue[]
+  prerequisiteTech   Technology?      @relation(fields: [prerequisiteTechId], references: [id])
+  playerBuildings    PlayerBuilding[]
 
-  @@index([owner_player_id], map: "Unit_owner_player_id_fkey")
-  @@index([session_id], map: "Unit_session_id_fkey")
-  @@index([unit_type_id], map: "Unit_unit_type_id_fkey")
+  @@index([prerequisiteTechId], map: "Building_prerequisiteTechId_fkey")
 }
 
-model GameResearch {
-  session_id        String             @id @db.Char(36)
-  current_tech_id   String?            @db.VarChar(50)
-  current_tech      Tech?              @relation(fields: [current_tech_id], references: [id])
-  game_session      GameSession        @relation(fields: [session_id], references: [id])
-  research_progress ResearchProgress[]
-  researched_techs  ResearchedTech[]
+model PlayerBuilding {
+  id          BigInt      @id @default(autoincrement())
+  status      BuildStatus
+  buildingId  Int
+  cityId      BigInt
+  completedAt DateTime?
+  gameCivId   BigInt
+  startedAt   DateTime?
+  building    Building    @relation(fields: [buildingId], references: [id])
+  city        City        @relation(fields: [cityId], references: [id])
+  gameCiv     GameCiv     @relation(fields: [gameCivId], references: [id])
 
-  @@index([current_tech_id], map: "GameResearch_current_tech_id_fkey")
+  @@index([buildingId], map: "PlayerBuilding_buildingId_fkey")
+  @@index([cityId], map: "PlayerBuilding_cityId_fkey")
+  @@index([gameCivId], map: "PlayerBuilding_gameCivId_fkey")
 }
 
-model ResearchedTech {
-  session_id    String       @db.Char(36)
-  tech_id       String       @db.VarChar(50)
-  game_research GameResearch @relation(fields: [session_id], references: [session_id])
-  tech          Tech         @relation(fields: [tech_id], references: [id])
+model BuildQueue {
+  id            BigInt   @id @default(autoincrement())
+  addedAt       DateTime @default(now())
+  buildingId    Int
+  cityId        BigInt
+  queuePosition Int
+  building      Building @relation(fields: [buildingId], references: [id])
 
-  @@id([session_id, tech_id])
-  @@index([tech_id], map: "ResearchedTech_tech_id_fkey")
+  @@index([buildingId], map: "BuildQueue_buildingId_fkey")
 }
 
-model ResearchProgress {
-  session_id    String       @db.Char(36)
-  tech_id       String       @db.VarChar(50)
-  progress      Int
-  game_research GameResearch @relation(fields: [session_id], references: [session_id])
-  tech          Tech         @relation(fields: [tech_id], references: [id])
+model DiplomacySession {
+  personality       PersonalityType
+  aiCivId           BigInt
+  gameCivId         BigInt
+  relationshipScore Int
+  sessionId         BigInt            @id @default(autoincrement())
+  diplomacyActions  DiplomacyAction[]
+  aiCiv             GameCiv           @relation("TargetCiv", fields: [aiCivId], references: [id])
+  gameCiv           GameCiv           @relation("InitiatorCiv", fields: [gameCivId], references: [id])
 
-  @@id([session_id, tech_id])
-  @@index([tech_id], map: "ResearchProgress_tech_id_fkey")
+  @@index([aiCivId], map: "DiplomacySession_aiCivId_fkey")
+  @@index([gameCivId], map: "DiplomacySession_gameCivId_fkey")
 }
 
-model GamePolicies {
-  session_id       String          @id @db.Char(36)
-  culture          Int
-  adopted_policies AdoptedPolicy[]
-  game_session     GameSession     @relation(fields: [session_id], references: [id])
+model DiplomacyAction {
+  id         BigInt           @id @default(autoincrement())
+  turn       Int
+  terms      Json
+  delta      Int
+  actionType ActionType
+  newScore   Int
+  sessionId  BigInt
+  session    DiplomacySession @relation(fields: [sessionId], references: [sessionId])
+
+  @@index([sessionId], map: "DiplomacyAction_sessionId_fkey")
 }
 
-model AdoptedPolicy {
-  session_id    String       @db.Char(36)
-  policy_id     String       @db.VarChar(50)
-  policy        Policy       @relation(fields: [policy_id], references: [id])
-  game_policies GamePolicies @relation(fields: [session_id], references: [session_id])
+model AdviceRequest {
+  id        BigInt   @id @default(autoincrement())
+  turn      Int
+  createdAt DateTime @default(now())
+  gameCivId BigInt
+  usedCount Int
+  gameCiv   GameCiv  @relation(fields: [gameCivId], references: [id])
 
-  @@id([session_id, policy_id])
-  @@index([policy_id], map: "AdoptedPolicy_policy_id_fkey")
+  @@index([gameCivId], map: "AdviceRequest_gameCivId_fkey")
 }
 
-model GameReligion {
-  session_id         String             @id @db.Char(36)
-  faith              Int
-  founded_religions  FoundedReligion[]
-  game_session       GameSession        @relation(fields: [session_id], references: [id])
-  selected_doctrines SelectedDoctrine[]
+model TurnSnapshot {
+  id              BigInt   @id @default(autoincrement())
+  civId           BigInt
+  createdAt       DateTime @default(now())
+  diplomacyState  Json
+  gameId          BigInt
+  observedMap     Json
+  productionState Json
+  researchState   Json
+  turnNumber      Int
+  game            Game     @relation(fields: [gameId], references: [id])
+
+  @@index([gameId], map: "TurnSnapshot_gameId_fkey")
 }
 
-model FoundedReligion {
-  session_id    String       @db.Char(36)
-  religion_name String       @db.VarChar(100)
-  founder       String?      @db.VarChar(100)
-  game_religion GameReligion @relation(fields: [session_id], references: [session_id])
-
-  @@id([session_id, religion_name])
+model LeaderProfile {
+  id                 BigInt          @id @default(autoincrement())
+  backstory          String?
+  personality        PersonalityType
+  civTypeId          Int             @unique
+  createdAt          DateTime        @default(now())
+  fullName           String          @db.VarChar(100)
+  imageUrl           String?         @db.VarChar(255)
+  preferredVictories String?
+  updatedAt          DateTime        @updatedAt
+  civType            CivType         @relation(fields: [civTypeId], references: [id])
 }
 
-model SelectedDoctrine {
-  session_id    String       @db.Char(36)
-  doctrine_id   String       @db.VarChar(50)
-  doctrine      Doctrine     @relation(fields: [doctrine_id], references: [id])
-  game_religion GameReligion @relation(fields: [session_id], references: [session_id])
-
-  @@id([session_id, doctrine_id])
-  @@index([doctrine_id], map: "SelectedDoctrine_doctrine_id_fkey")
+enum PersonalityType {
+  Diplomat
+  Warlike
+  Pacifist
+  Trader
 }
 
-model CivRelation {
-  session_id       String      @db.Char(36)
-  player_id        Int
-  target_player_id Int
-  status           String?     @db.VarChar(20)
-  relation_value   Int?
-  player           Player      @relation("SourcePlayer", fields: [player_id], references: [id])
-  game_session     GameSession @relation(fields: [session_id], references: [id])
-  target_player    Player      @relation("TargetPlayer", fields: [target_player_id], references: [id])
-
-  @@id([session_id, player_id, target_player_id])
-  @@index([player_id], map: "CivRelation_player_id_fkey")
-  @@index([target_player_id], map: "CivRelation_target_player_id_fkey")
+enum ResourceType {
+  NoResource
+  Food
+  Production
+  Gold
+  Science
 }
 
-model CityStateRelation {
-  session_id    String      @db.Char(36)
-  city_state_id Int
-  player_id     Int
-  influence     Int?
-  is_allied     Boolean?
-  player        Player      @relation(fields: [player_id], references: [id])
-  game_session  GameSession @relation(fields: [session_id], references: [id])
-
-  @@id([session_id, city_state_id, player_id])
-  @@index([player_id], map: "CityStateRelation_player_id_fkey")
+enum ResearchStatus {
+  locked
+  available
+  in_progress
+  completed
 }
 
-model GameEvent {
-  id           Int         @id @default(autoincrement())
-  session_id   String      @db.Char(36)
-  turn_number  Int?
-  event_type   String?     @db.VarChar(50)
-  event_data   Json?
-  created_at   DateTime    @default(now())
-  game_session GameSession @relation(fields: [session_id], references: [id])
-
-  @@index([session_id], map: "GameEvent_session_id_fkey")
+enum UnitCategory {
+  Melee
+  Ranged
+  Cavalry
+  Siege
+  Modern
 }
 
-model GameMode {
-  id            String        @id @db.VarChar(50)
-  name          String        @db.VarChar(100)
-  turns         Int
-  estimatedTime String        @db.VarChar(50)
-  description   String?       @db.Text
-  game_sessions GameSession[]
+enum EraType {
+  Medieval
+  Industrial
+  Modern
 }
 
-model Difficulty {
-  id            String        @id @db.VarChar(50)
-  name          String        @db.VarChar(100)
-  description   String?       @db.Text
-  aiBonus       String?       @db.VarChar(100)
-  playerPenalty String?       @db.VarChar(100)
-  game_sessions GameSession[]
+enum ItemType {
+  unit
+  building
 }
 
-model Civilization {
-  id              String   @id @db.VarChar(50)
-  name            String   @db.VarChar(100)
-  leader          String   @db.VarChar(100)
-  specialAbility  String?  @db.Text
-  specialUnit     String?  @db.VarChar(100)
-  specialBuilding String?  @db.VarChar(100)
-  playStyle       String?  @db.VarChar(100)
-  players         Player[]
+enum BuildStatus {
+  queued
+  in_progress
+  completed
 }
 
-model MapType {
-  id            String        @id @db.VarChar(50)
-  name          String        @db.VarChar(100)
-  description   String?       @db.Text
-  features      String?       @db.Text
-  game_sessions GameSession[]
-}
-
-model GameSession {
-  id                   String              @id @default(uuid()) @db.Char(36)
-  host_user_id         Int
-  map_type_id          String              @db.VarChar(50)
-  game_mode_id         String              @db.VarChar(50)
-  difficulty_id        String              @db.VarChar(50)
-  civ_count            Int                 @default(6)
-  seed                 BigInt
-  current_turn         Int                 @default(1)
-  current_player       Int
-  status               String              @default("ongoing") @db.VarChar(20)
-  created_at           DateTime
-  updated_at           DateTime            @updatedAt
-  cities               City[]
-  city_state_relations CityStateRelation[]
-  civ_relations        CivRelation[]
-  game_events          GameEvent[]
-  game_policies        GamePolicies?
-  game_religion        GameReligion?
-  game_research        GameResearch?
-  difficulty           Difficulty          @relation(fields: [difficulty_id], references: [id])
-  game_mode            GameMode            @relation(fields: [game_mode_id], references: [id])
-  host_user            User                @relation("HostedGames", fields: [host_user_id], references: [id])
-  map_type             MapType             @relation(fields: [map_type_id], references: [id])
-  hexagons             Hexagon[]
-  map_seed             MapSeed?
-  players              Player[]
-  units                Unit[]
-
-  @@index([difficulty_id], map: "GameSession_difficulty_id_fkey")
-  @@index([game_mode_id], map: "GameSession_game_mode_id_fkey")
-  @@index([host_user_id], map: "GameSession_host_user_id_fkey")
-  @@index([map_type_id], map: "GameSession_map_type_id_fkey")
-}
-
-model Player {
-  id                   Int                 @id @default(autoincrement())
-  session_id           String              @db.Char(36)
-  user_id              Int
-  civ_id               String              @db.VarChar(50)
-  civilization         Civilization        @relation(fields: [civ_id], references: [id])
-  is_ai                Boolean             @default(false)
-  player_index         Int
-  cities               City[]
-  city_state_relations CityStateRelation[]
-  source_relations     CivRelation[]       @relation("SourcePlayer")
-  target_relations     CivRelation[]       @relation("TargetPlayer")
-  game_session         GameSession         @relation(fields: [session_id], references: [id])
-  user                 User                @relation(fields: [user_id], references: [id])
-  units                Unit[]
-
-  @@unique([session_id, player_index], name: "ux_player_order")
-  @@index([civ_id], map: "Player_civ_id_fkey")
-  @@index([user_id], map: "Player_user_id_fkey")
+enum ActionType {
+  declare_friendship
+  propose_trade
+  declare_war
+  make_peace
+  offer_alliance
 }
