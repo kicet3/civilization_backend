@@ -35,7 +35,6 @@ async def initialize_map(user_name: str):
                 "createdAt": datetime.now()
             }
         )
-        print('Created new game')
         
         # 2. 문명 타입 생성 (7개 문명)
         civ_types = [
@@ -155,21 +154,69 @@ async def initialize_map(user_name: str):
                 "isMain": True  # is_main이 아닌 isMain 사용
             }
         )
-        print('Created player tree selection',new_game.id)
+        
+        # 8-1. 초기 기술 설정 (첫 시대의 기술들을 available 상태로 설정)
+        # 첫 시대(Medieval) 기술 조회
+        initial_techs = await prisma.technology.find_many(
+            where={
+                "era": "Medieval"
+            }
+        )
+        
+        # 각 기술을 available 상태로 설정
+        for tech in initial_techs:
+            await prisma.gamecivtechnology.create(
+                data={
+                    "gameCivId": player_civ.id,
+                    "techId": tech.id,
+                    "status": "available",
+                    "progressPoints": 0
+                }
+            )
+        
+        # AI 문명에도 동일하게 적용
+        for ai_civ in ai_civs:
+            for tech in initial_techs:
+                await prisma.gamecivtechnology.create(
+                    data={
+                        "gameCivId": ai_civ.id,
+                        "techId": tech.id,
+                        "status": "available",
+                        "progressPoints": 0
+                    }
+                )
+        
         # 9. 턴 스냅샷 생성
+        # 플레이어 도시 주변 시야 계산 (2헥스 범위)
+        city_sight_range = 2
+        visible_tiles = set()
+        visible_tiles.add((0, 0))  # 플레이어 도시 위치
+        
+        # 도시 주변 타일 추가
+        for q_offset in range(-city_sight_range, city_sight_range + 1):
+            for r_offset in range(max(-city_sight_range, -q_offset - city_sight_range), 
+                                min(city_sight_range, -q_offset + city_sight_range) + 1):
+                visible_tiles.add((q_offset, r_offset))
+        
+        # 시야 정보가 포함된 초기 맵 상태
+        initial_observed_tiles = [
+            {"q": t.q, "r": t.r, "terrain": t.terrain, "resource": t.resource}
+            for t in map_tiles if (t.q, t.r) in visible_tiles
+        ]
+        
         await prisma.turnsnapshot.create(
             data={
                 "id": new_game.id,
                 "game": {"connect": {"id": new_game.id}},
                 "turnNumber": 1,
                 "civId": player_civ.id,
-                "observedMap": json.dumps({"tiles": [{"q": t.q, "r": t.r, "terrain": t.terrain, "resource": t.resource} for t in map_tiles]}),
+                "observedMap": json.dumps({"tiles": initial_observed_tiles}),
                 "researchState": json.dumps({"current": None, "queue": []}),
                 "productionState": json.dumps({"current": None, "queue": []}),
                 "diplomacyState": json.dumps({"relations": {}})
             }
         )
-        print('Created turn snapshot')
+        
         # 성공 응답 반환
         return {
             "success": True,
@@ -243,22 +290,21 @@ async def get_map_data(game_id: Optional[int] = Query(None, description="게임 
             }
         
         # 최신 턴 스냅샷 조회
-        turn_snapshot = await prisma.turnsnapshot.find_first(
+        turn_snapshots = await prisma.turnsnapshot.find_many(
             where={
                 "gameId": game_id,
-                "turnNumber": 1  # 또는 현재 턴 조회 로직 추가
-            },
-            order_by={
-                "turnNumber": "desc"
             }
         )
         
-        if not turn_snapshot:
+        if not turn_snapshots:
             return {
                 "success": False,
                 "status_code": 404,
                 "message": f"게임 상태를 찾을 수 없습니다."
             }
+            
+        # 가장 높은 턴 번호를 가진 스냅샷 찾기
+        turn_snapshot = max(turn_snapshots, key=lambda x: x.turnNumber)
         
         # 맵 타일 조회
         map_tiles = await prisma.maptile.find_many(
@@ -279,14 +325,61 @@ async def get_map_data(game_id: Optional[int] = Query(None, description="게임 
             }
         )
         
-        # 게임 상태 구성
+        # 플레이어 문명 찾기
+        player_civ = next((civ for civ in game_civs if civ.isPlayer), None)
+        
+        # 시야 범위 계산 (플레이어의 도시와 유닛 주변)
+        visible_tiles = set()
+        explored_tiles = set()
+        
+        # 턴 스냅샷에서 이전에 탐색한 타일 정보 가져오기
+        try:
+            observed_map = json.loads(turn_snapshot.observedMap)
+            if isinstance(observed_map, dict) and "tiles" in observed_map:
+                for tile_data in observed_map["tiles"]:
+                    explored_tiles.add((tile_data["q"], tile_data["r"]))
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            # 오류 발생 시 로그만 남기고 진행 (빈 explored_tiles 사용)
+            print(f"맵 상태 파싱 오류: {str(e)}")
+        
+        if player_civ:
+            # 도시 시야 범위 (2 헥스로 변경)
+            city_sight_range = 2
+            for city in player_civ.cities:
+                # 도시 위치 자체도 추가
+                visible_tiles.add((city.q, city.r))
+                
+                # 도시 주변 타일 추가
+                for q_offset in range(-city_sight_range, city_sight_range + 1):
+                    for r_offset in range(max(-city_sight_range, -q_offset - city_sight_range), 
+                                         min(city_sight_range, -q_offset + city_sight_range) + 1):
+                        visible_tiles.add((city.q + q_offset, city.r + r_offset))
+            
+            # 유닛 시야 범위 (일반적으로 2 헥스, 유닛 타입에 따라 다를 수 있음)
+            for unit in player_civ.units:
+                # 기본 시야 범위
+                unit_sight_range = 2
+                
+                # 유닛 위치 자체도 추가
+                visible_tiles.add((unit.q, unit.r))
+                
+                # 유닛 주변 타일 추가
+                for q_offset in range(-unit_sight_range, unit_sight_range + 1):
+                    for r_offset in range(max(-unit_sight_range, -q_offset - unit_sight_range), 
+                                         min(unit_sight_range, -q_offset + unit_sight_range) + 1):
+                        visible_tiles.add((unit.q + q_offset, unit.r + r_offset))
+        
+        # 시야 정보를 포함한 타일 정보 생성
         game_state = {
             "tiles": [
                 {
                     "q": tile.q,
                     "r": tile.r,
                     "terrain": tile.terrain,
-                    "resource": tile.resource.value
+                    "resource": tile.resource,
+                    "exploration": "visible" if (tile.q, tile.r) in visible_tiles else
+                                  "explored" if (tile.q, tile.r) in explored_tiles else 
+                                  "unexplored"
                 } for tile in map_tiles
             ],
             "civs": [
@@ -383,7 +476,7 @@ async def get_adjacent_tiles(q: int, r: int, game_id: int):
                     "r": tile.r,
                     "s": -tile.q - tile.r,
                     "terrain": tile.terrain,
-                    "resource": tile.resource.value
+                    "resource": tile.resource
                 })
         
         # 성공 응답 반환
