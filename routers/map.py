@@ -128,7 +128,9 @@ async def initialize_map(user_name: str):
                 "q": 0,
                 "r": 0,
                 "population": 1,
-                "createdTurn": 1  # created_turn이 아닌 createdTurn 사용
+                "createdTurn": 1,  # created_turn이 아닌 createdTurn 사용
+                "food": 20,        # 초기 식량 20
+                "production": 10   # 초기 생산력 10
             }
         )
         
@@ -142,7 +144,28 @@ async def initialize_map(user_name: str):
                     "q": ai_civ.startQ,
                     "r": ai_civ.startR,
                     "population": 1,
-                    "createdTurn": 1
+                    "createdTurn": 1,
+                    "food": 20,
+                    "production": 10
+                }
+            )
+        
+        # 문명 초기 자원 설정
+        await prisma.gameciv.update(
+            where={"id": player_civ.id},
+            data={
+                "gold": 30,
+                "science": 5
+            }
+        )
+        
+        # AI 문명 초기 자원 설정
+        for ai_civ in ai_civs:
+            await prisma.gameciv.update(
+                where={"id": ai_civ.id},
+                data={
+                    "gold": 30,
+                    "science": 5
                 }
             )
         

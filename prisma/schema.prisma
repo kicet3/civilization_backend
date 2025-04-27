@@ -35,6 +35,10 @@ model GameCiv {
   isPlayer          Boolean
   startQ            Int
   startR            Int
+  food              Int                 @default(0)
+  production        Int                 @default(0)
+  gold              Int                 @default(30)
+  science           Int                 @default(5)
   adviceRequests    AdviceRequest[]
   cities            City[]
   receivedSessions  DiplomacySession[]  @relation("TargetCiv")
@@ -69,6 +73,8 @@ model City {
   r               Int
   population      Int
   createdTurn     Int
+  food            Int               @default(20)
+  production      Int               @default(10)
   gameCivId       BigInt
   gameCiv         GameCiv           @relation(fields: [gameCivId], references: [id])
   buildings       PlayerBuilding[]
@@ -297,6 +303,76 @@ model LeaderProfile {
   preferredVictories String?
   updatedAt          DateTime        @updatedAt
   civType            CivType         @relation(fields: [civTypeId], references: [id])
+}
+
+model GameSummary {
+  id                    BigInt    @id @default(autoincrement())
+  gameId                String
+  userId                String?
+  turn                  Int
+  year                  Int?
+  difficulty            String?
+  mapType               String?
+  gameMode              String?
+  victoryType           String?
+  
+  startTime             DateTime?
+  endTime               DateTime?
+  totalPlayTime         Int?
+  
+  civilizationId        Int?
+  civilizationName      String?
+  leaderName            String?
+  
+  resources             Json
+  
+  cities                Json
+  totalCities           Int
+  capitalCity           Json?
+  capturedCities        Int       @default(0)
+  foundedCities         Int       @default(0)
+  
+  units                 Json
+  totalUnits            Int
+  militaryUnits         Int
+  civilianUnits         Int
+  unitsLost             Int       @default(0)
+  unitsKilled           Int       @default(0)
+  
+  completedTechnologies Json
+  currentResearch       Json?
+  researchProgress      Int?
+  researchQueue         Json
+  totalTechsResearched  Int
+  techEra               String?
+  selectedTechTrees     Json
+  
+  diplomacyStates       Json
+  wars                  Int       @default(0)
+  alliances             Int       @default(0)
+  trades                Int       @default(0)
+  
+  battles               Json
+  territoryCaptured     Int       @default(0)
+  territoryLost         Int       @default(0)
+  successfulDefenses    Int       @default(0)
+  successfulAttacks     Int       @default(0)
+  
+  events                Json
+  actionCounts          Json
+  
+  exploredTiles         Int
+  visibleTiles          Int
+  unexploredTiles       Int
+  resourceLocations     Json
+  
+  totalScore            Int
+  scoreComponents       Json
+  achievements          Json
+  milestones            Json
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 }
 
 enum PersonalityType {
