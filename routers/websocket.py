@@ -7,6 +7,13 @@ import uuid
 from datetime import datetime
 from pydantic import BaseModel
 import asyncio
+# LangChain 관련 임포트 수정
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.chains import ConversationChain
+from langchain.memory import ConversationBufferMemory
+# Ollama 관련 임포트는 유지 (필요할 수 있으므로)
+from langchain_ollama import ChatOllama
 
 router = APIRouter()
 
@@ -163,12 +170,11 @@ async def get_chat_history(chat_id: str):
     }
 
 async def generate_llm_response(chat_id: str, user_message: str, game_state: Optional[Dict[str, Any]] = None) -> str:
-    """LLM API를 호출하여 응답을 생성합니다."""
+    """LangChain을 사용하여 Gemini API를 호출하여 응답을 생성합니다."""
     try:
-        # Gemini API 설정
-        api_key = os.getenv("GOOGLE_API_KEY", "YOUR_GOOGLE_API_KEY")
-        api_url = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/models")
-        model = os.getenv("GEMINI_MODEL", "gemini-pro")
+        # Gemini 모델 설정
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
         
         # 대화 기록 가져오기
         conversation = manager.get_conversation_history(chat_id)
@@ -184,14 +190,14 @@ async def generate_llm_response(chat_id: str, user_message: str, game_state: Opt
             
             # 도시 정보
             cities = player_civ.get("cities", [])
-            city_info = "\n".join([f"- {city.get('name')}: 인구 {city.get('population')}, "
+            city_info = "\n".join([f"- {city.get('name', '이름 없음')}: 인구 {city.get('population', '정보 없음')}, "
                                   f"건설 중: {city.get('in_progress', {}).get('building', '없음')}"
                                   for city in cities])
             
             context_update = f"""
 현재 게임 상태 업데이트:
-턴: {game_state.get('turn')}
-시대: {game_state.get('era')}
+턴: {game_state.get('turn', '정보 없음')}
+시대: {game_state.get('era', '정보 없음')}
 현재 연구 중인 기술: {current_research}
 
 도시 정보:
@@ -213,72 +219,98 @@ async def generate_llm_response(chat_id: str, user_message: str, game_state: Opt
                 system_prompt = SYSTEM_PROMPT.format(additional_context=additional_context)
                 conversation.insert(0, {"role": "system", "content": system_prompt})
         
-        # Gemini API 요청 형식 변환
-        gemini_messages = []
+        # LangChain 메시지 형식으로 변환
+        langchain_messages = []
         
-        # 시스템 메시지 처리 (Gemini는 system role을 직접 지원하지 않으므로 user 메시지로 변환)
-        system_content = ""
         for msg in conversation:
             if msg["role"] == "system":
-                system_content = msg["content"]
-                break
-                
-        if system_content:
-            gemini_messages.append({
-                "role": "user",
-                "parts": [{"text": f"시스템 지침: {system_content}\n\n이제부터 이 지침에 따라 응답해주세요."}]
-            })
-            gemini_messages.append({
-                "role": "model",
-                "parts": [{"text": "네, 이해했습니다. 문명 게임의 AI 상담가로서 플레이어 질문에 답변하겠습니다."}]
-            })
+                langchain_messages.append(SystemMessage(content=msg["content"]))
+            elif msg["role"] == "user":
+                langchain_messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                langchain_messages.append(AIMessage(content=msg["content"]))
         
-        # 나머지 대화 내용 변환
-        for msg in conversation:
-            if msg["role"] != "system":  # 시스템 메시지는 이미 처리함
-                gemini_role = "user" if msg["role"] == "user" else "model"
-                gemini_messages.append({
-                    "role": gemini_role,
-                    "parts": [{"text": msg["content"]}]
-                })
-                
-        # API 요청 데이터 구성
-        request_data = {
-            "contents": gemini_messages,
-            "generationConfig": {
-                "temperature": 0.7,
-                "topP": 0.8,
-                "topK": 40,
-                "maxOutputTokens": 1000,
-            }
-        }
+        # 마지막 메시지가 사용자의 현재 질문인지 확인
+        if not langchain_messages or langchain_messages[-1].type != "human" or langchain_messages[-1].content != user_message:
+            langchain_messages.append(HumanMessage(content=user_message))
         
-        # 실제 환경에서 Gemini API 호출
-        complete_url = f"{api_url}/{model}:generateContent?key={api_key}"
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                complete_url,
-                json=request_data,
-                timeout=30.0
+        try:
+            # 환경 변수 확인
+            if not google_api_key:
+                print("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
+                raise ValueError("Google API Key가 설정되지 않았습니다.")
+            
+            # 채팅에서는 Gemini 사용
+            print(f"채팅 대화를 위해 Gemini 모델({gemini_model}) 사용")
+            chat_model = ChatGoogleGenerativeAI(
+                model=gemini_model,
+                google_api_key=google_api_key,
+                temperature=0.7,
+                top_p=0.95,
+                top_k=40,
+                convert_system_message_to_human=True  # Gemini는 SystemMessage를 직접 처리하지 않음
             )
             
-            if response.status_code != 200:
-                print(f"Gemini API 오류: {response.status_code} - {response.text}")
-                return "죄송합니다. API 응답 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-                
-            result = response.json()
+            # LLM 호출
+            response = chat_model.invoke(langchain_messages)
             
-            # Gemini API 응답 구조에서 텍스트 추출
+            # 응답 텍스트 추출
+            response_text = response.content
+            
+            if not response_text:
+                print("Gemini 응답에 텍스트가 없습니다.")
+                return "죄송합니다. API에서 텍스트 응답을 받지 못했습니다. 잠시 후 다시 시도해주세요."
+            
+            return response_text
+            
+        except Exception as e:
+            print(f"Gemini 모델 호출 오류: {str(e)}")
+            
+            # Gemini 호출 실패 시 예비로 Ollama 사용 시도
             try:
-                content = result.get("candidates", [])[0].get("content", {})
-                text_parts = content.get("parts", [])
-                response_text = "".join([part.get("text", "") for part in text_parts])
-                return response_text
-            except (KeyError, IndexError) as e:
-                print(f"Gemini 응답 파싱 오류: {str(e)}, 응답: {result}")
-                return "죄송합니다. 응답을 처리하는 중 오류가 발생했습니다."
+                # Ollama 설정
+                ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+                ollama_model = os.getenv("OLLAMA_MODEL", "eeve-korean-10.8b") 
+                
+                print(f"Gemini 호출 실패로 인한 Ollama 모델({ollama_model}) 백업 사용")
+                chat_model = ChatOllama(
+                    model=ollama_model,
+                    base_url=ollama_url,
+                    temperature=0.7,
+                    top_p=0.8,
+                    top_k=40,
+                    num_predict=1000,
+                )
+                
+                # LLM 호출
+                response = chat_model.invoke(langchain_messages)
+                
+                # 응답 텍스트 추출
+                response_text = response.content
+                
+                if response_text:
+                    return response_text
+            except Exception as e2:
+                print(f"Ollama 백업 호출도 실패: {str(e2)}")
+            
+            # 오류 발생 시 백업으로 개발 모드 응답 사용
+            if os.getenv("ENVIRONMENT", "development") == "development":
+                print("개발 모드에서 백업 응답을 사용합니다.")
+                backup_responses = [
+                    "문명 게임에서는 균형 잡힌 개발이 중요합니다. 과학, 문화, 군사력을 골고루 발전시키세요.",
+                    "초기에는 도시 개발과 정착민 생산에 집중하는 것이 좋습니다.",
+                    "자원 타일 위에 도시를 건설하면 해당 자원을 바로 활용할 수 있습니다.",
+                    "다른 문명과의 외교 관계를 잘 관리하세요. 무역로를 설정하면 경제적 이득을 얻을 수 있습니다.",
+                    "군사 유닛을 적절히 배치하여 도시와 국경을 방어하세요.",
+                    "연구 기술을 선택할 때는 현재 당신이 가장 필요로 하는 기술을 우선적으로 연구하세요."
+                ]
+                import random
+                return random.choice(backup_responses)
+            
+            return f"죄송합니다. LLM 호출 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요. (오류: {str(e)})"
         
     except Exception as e:
+        import traceback
         print(f"LLM 응답 생성 오류: {str(e)}")
-        return f"죄송합니다. 응답을 생성하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+        print(traceback.format_exc())  # 상세 오류 스택트레이스 출력
+        return f"죄송합니다. 응답을 생성하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요. (오류: {str(e)})"

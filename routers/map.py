@@ -32,7 +32,9 @@ async def initialize_map(user_name: str):
                 "userName": user_name_hash,  # snake_case가 아닌 camelCase 사용
                 "mapRadius": 10,
                 "turnLimit": 50,
-                "createdAt": datetime.now()
+                "createdAt": datetime.now(),
+                "year": 1000,  # 1턴의 연도를 1000년으로 세팅
+                "currentTurn": 1
             }
         )
         
@@ -130,7 +132,7 @@ async def initialize_map(user_name: str):
                 "population": 1,
                 "createdTurn": 1,  # created_turn이 아닌 createdTurn 사용
                 "food": 20,        # 초기 식량 20
-                "production": 10   # 초기 생산력 10
+                "production": 10    # 초기 생산력 10
             }
         )
         
@@ -155,7 +157,8 @@ async def initialize_map(user_name: str):
             where={"id": player_civ.id},
             data={
                 "gold": 30,
-                "science": 5
+                "science": 5,
+                "culture": 0
             }
         )
         
@@ -165,11 +168,86 @@ async def initialize_map(user_name: str):
                 where={"id": ai_civ.id},
                 data={
                     "gold": 30,
-                    "science": 5
+                    "science": 5,
+                    "culture": 0
                 }
             )
         
-        # 8. 기술 트리 선택 (플레이어)
+        # 8. 초기 유닛 생성
+        # 플레이어 문명 시작 유닛 생성
+        # 초기 전사 유닛 (근접 유닛)
+        initial_warrior = await prisma.unittype.find_first(
+            where={
+                "category": "Melee",
+                "era": "Medieval"
+            }
+        )
+        
+        if initial_warrior:
+            await prisma.gameunit.create(
+                data={
+                    "gameCivId": player_civ.id,
+                    "unitTypeId": initial_warrior.id,
+                    "q": 0,  # 도시 위치와 동일
+                    "r": 0,
+                    "hp": 100,
+                    "createdTurn": 1,
+                    "moved": False
+                }
+            )
+        
+        # 초기 정찰병 (정찰 유닛)
+        initial_scout = await prisma.unittype.find_first(
+            where={
+                "category": "Civilian",
+                "era": "Medieval"
+            }
+        )
+        
+        if initial_scout:
+            await prisma.gameunit.create(
+                data={
+                    "gameCivId": player_civ.id,
+                    "unitTypeId": initial_scout.id,
+                    "q": 0,  # 도시 위치와 동일
+                    "r": 0,
+                    "hp": 100,
+                    "createdTurn": 1,
+                    "moved": False
+                }
+            )
+        
+        # AI 문명 시작 유닛 생성
+        for ai_civ in ai_civs:
+            # AI 전사 유닛
+            if initial_warrior:
+                await prisma.gameunit.create(
+                    data={
+                        "gameCivId": ai_civ.id,
+                        "unitTypeId": initial_warrior.id,
+                        "q": ai_civ.startQ,  # AI 도시 위치와 동일
+                        "r": ai_civ.startR,
+                        "hp": 100,
+                        "createdTurn": 1,
+                        "moved": False
+                    }
+                )
+            
+            # AI 정찰병 유닛 (50% 확률로 생성)
+            if initial_scout and random.random() < 0.5:
+                await prisma.gameunit.create(
+                    data={
+                        "gameCivId": ai_civ.id,
+                        "unitTypeId": initial_scout.id,
+                        "q": ai_civ.startQ,  # AI 도시 위치와 동일
+                        "r": ai_civ.startR,
+                        "hp": 100,
+                        "createdTurn": 1,
+                        "moved": False
+                    }
+                )
+        
+        # 9. 기술 트리 선택 (플레이어)
         await prisma.treeselection.create(
             data={
                 "gameCivId": player_civ.id,
@@ -227,18 +305,84 @@ async def initialize_map(user_name: str):
             for t in map_tiles if (t.q, t.r) in visible_tiles
         ]
         
-        await prisma.turnsnapshot.create(
-            data={
-                "id": new_game.id,
-                "game": {"connect": {"id": new_game.id}},
-                "turnNumber": 1,
-                "civId": player_civ.id,
-                "observedMap": json.dumps({"tiles": initial_observed_tiles}),
-                "researchState": json.dumps({"current": None, "queue": []}),
-                "productionState": json.dumps({"current": None, "queue": []}),
-                "diplomacyState": json.dumps({"relations": {}})
+        # 초기 게임 상태 데이터 생성
+        initial_state_data = {
+            "turn": 1,
+            "year": 1000,  # 게임 시작 연도
+            "era": "Medieval",
+            "player_civ": {
+                "id": player_civ.id,
+                "name": created_civ_types[0].name,
+                "leader": created_civ_types[0].leaderName
+            },
+            "cities": [],  # 빈 초기 도시 목록 (나중에 업데이트됨)
+            "units": [],   # 빈 초기 유닛 목록 (나중에 업데이트됨)
+            "resources": {
+                "gold": 30,
+                "science": 5,
+                "culture": 0,
+                "food": 20,
+                "production": 10
             }
-        )
+        }
+        
+        # 플레이어 재화 정보
+        player_resources = {
+            "gold": 30,
+            "science": 5,
+            "culture": 0,
+            "food": 20,
+            "production": 10
+        }
+        
+        # TurnSnapshot 생성
+        try:
+            turn_snapshot = await prisma.turnsnapshot.create(
+                data={
+                    "gameId": new_game.id,
+                    "turnNumber": 1,
+                    "civId": player_civ.id,
+                    "observedMap": json.dumps({"tiles": initial_observed_tiles}),
+                    "researchState": json.dumps({"current": None, "queue": []}),
+                    "productionState": json.dumps({"current": None, "queue": []}),
+                    "diplomacyState": json.dumps({"relations": {}}),
+                    "resourceState": json.dumps({
+                        "gold": 30,
+                        "science": 20,
+                        "food": 30,
+                        "production": 20,
+                        "culture": 0
+                    }),
+                    "stateData": initial_state_data,
+                    "playerResources": player_resources
+                }
+            )
+            print(f"TurnSnapshot 생성 성공: ID {turn_snapshot.id}, 게임 ID {new_game.id}")
+        except Exception as e:
+            print(f"TurnSnapshot 생성 오류: {str(e)}")
+            # 오류 세부 정보 출력
+            import traceback
+            traceback.print_exc()
+            
+            # TurnSnapshot 생성 실패 시 다시 시도 (기본 필수 필드만)
+            try:
+                simplified_snapshot = await prisma.turnsnapshot.create(
+                    data={
+                        "gameId": new_game.id,
+                        "turnNumber": 1,
+                        "civId": player_civ.id,
+                        "observedMap": "{}",
+                        "researchState": "{}",
+                        "productionState": "{}",
+                        "diplomacyState": "{}"
+                    }
+                )
+                print(f"기본 TurnSnapshot 생성 성공: ID {simplified_snapshot.id}, 게임 ID {new_game.id}")
+            except Exception as e2:
+                print(f"기본 TurnSnapshot 생성도 실패: {str(e2)}")
+                traceback.print_exc()
+                print(f"TurnSnapshot 생성 실패했지만 계속 진행합니다. 게임 ID: {new_game.id}")
+                # 이 경우 게임 상태 조회 시 오류가 발생할 수 있음
         
         # 성공 응답 반환
         return {
@@ -252,7 +396,9 @@ async def initialize_map(user_name: str):
                 "turnLimit": new_game.turnLimit,
                 "player_civ_id": player_civ.id,
                 "ai_civ_ids": [civ.id for civ in ai_civs],
-                "tileCount": len(map_tiles)
+                "tileCount": len(map_tiles),
+                "year": 1000,  # 1턴의 연도 정보 반환
+                "turn": 1
             },
             "createdAt": new_game.createdAt.isoformat()
         }
@@ -319,13 +465,140 @@ async def get_map_data(game_id: Optional[int] = Query(None, description="게임 
             }
         )
         
+        # 턴 스냅샷이 없는 경우 초기 턴 스냅샷 생성
         if not turn_snapshots:
-            return {
-                "success": False,
-                "status_code": 404,
-                "message": f"게임 상태를 찾을 수 없습니다."
+            print(f"게임 ID {game_id}에 대한 턴 스냅샷이 없습니다. 초기 스냅샷 생성 시도...")
+            
+            # 플레이어 문명 찾기
+            player_civ = await prisma.gameciv.find_first(
+                where={
+                    "gameId": game_id,
+                    "isPlayer": True
+                }
+            )
+            
+            if not player_civ:
+                return {
+                    "success": False,
+                    "status_code": 404,
+                    "message": "플레이어 문명을 찾을 수 없습니다."
+                }
+            
+            # 맵 타일 조회
+            map_tiles = await prisma.maptile.find_many(
+                where={
+                    "gameId": game_id
+                }
+            )
+            
+            # 플레이어 도시 주변 시야 계산 (2헥스 범위)
+            city_sight_range = 2
+            visible_tiles = set()
+            
+            # 플레이어 도시 찾기
+            player_cities = await prisma.city.find_many(
+                where={
+                    "gameCivId": player_civ.id
+                }
+            )
+            
+            # 도시 위치 기준 시야 계산
+            for city in player_cities:
+                visible_tiles.add((city.q, city.r))
+                
+                for q_offset in range(-city_sight_range, city_sight_range + 1):
+                    for r_offset in range(max(-city_sight_range, -q_offset - city_sight_range), 
+                                         min(city_sight_range, -q_offset + city_sight_range) + 1):
+                        visible_tiles.add((city.q + q_offset, city.r + r_offset))
+            
+            # 시야 정보가 포함된 초기 맵 상태
+            initial_observed_tiles = [
+                {"q": t.q, "r": t.r, "terrain": t.terrain, "resource": t.resource}
+                for t in map_tiles if (t.q, t.r) in visible_tiles
+            ]
+            
+            # 초기 게임 상태 데이터 생성
+            initial_state_data = {
+                "turn": 1,
+                "year": 1000,  # 게임 시작 연도
+                "era": "Medieval",
+                "player_civ": {
+                    "id": player_civ.id,
+                    "name": player_civ.name,
+                    "leader": player_civ.leaderName
+                },
+                "cities": [],  # 빈 초기 도시 목록
+                "units": []    # 빈 초기 유닛 목록
             }
             
+            # 플레이어 재화 정보
+            player_resources = {
+                "gold": player_civ.gold,
+                "science": player_civ.science,
+                "culture": player_civ.culture,
+                "food": player_civ.food,  # 기본값
+                "production": player_civ.production  # 기본값
+            }
+            
+            # 도시 정보로 food/production 업데이트
+            total_food = 0
+            total_production = 0
+            
+            for city in player_cities:
+                total_food += city.food
+                total_production += city.production
+            
+            if player_cities:
+                player_resources["food"] = total_food
+                player_resources["production"] = total_production
+            
+            # 초기 턴 스냅샷 생성
+            try:
+                new_snapshot = await prisma.turnsnapshot.create(
+                    data={
+                        "gameId": game_id,
+                        "turnNumber": 1,
+                        "civId": player_civ.id,
+                        "observedMap": json.dumps({"tiles": initial_observed_tiles}),
+                        "researchState": json.dumps({"current": None, "queue": []}),
+                        "productionState": json.dumps({"current": None, "queue": []}),
+                        "diplomacyState": json.dumps({"relations": {}}),
+                        "resourceState": json.dumps(player_resources),
+                        "stateData": initial_state_data,
+                        "playerResources": player_resources
+                    }
+                )
+                print(f"게임 ID {game_id}에 대한 초기 턴 스냅샷 생성 성공: ID {new_snapshot.id}")
+                turn_snapshots = [new_snapshot]
+            except Exception as e:
+                print(f"초기 턴 스냅샷 생성 실패: {str(e)}")
+                # 다시 시도 (간소화된 버전)
+                try:
+                    simple_snapshot = await prisma.turnsnapshot.create(
+                        data={
+                            "gameId": game_id,
+                            "turnNumber": 1,
+                            "civId": player_civ.id,
+                            "observedMap": "{}",
+                            "researchState": "{}",
+                            "productionState": "{}",
+                            "diplomacyState": "{}"
+                        }
+                    )
+                    print(f"간소화된 초기 턴 스냅샷 생성 성공: ID {simple_snapshot.id}")
+                    turn_snapshots = [simple_snapshot]
+                except Exception as e2:
+                    print(f"간소화된 초기 턴 스냅샷 생성도 실패: {str(e2)}")
+                    return {
+                        "success": False,
+                        "status_code": 500,
+                        "message": f"턴 스냅샷 생성 중 오류가 발생했습니다: {str(e2)}",
+                        "error": {
+                            "type": type(e2).__name__,
+                            "detail": str(e2)
+                        }
+                    }
+        
         # 가장 높은 턴 번호를 가진 스냅샷 찾기
         turn_snapshot = max(turn_snapshots, key=lambda x: x.turnNumber)
         
@@ -410,13 +683,18 @@ async def get_map_data(game_id: Optional[int] = Query(None, description="게임 
                     "id": civ.id,
                     "name": civ.civType.name,
                     "isPlayer": civ.isPlayer,
+                    "gold": civ.gold,
+                    "science": civ.science,
+                    "culture": civ.culture,
                     "cities": [
                         {
                             "id": city.id,
                             "name": city.name,
                             "q": city.q,
                             "r": city.r,
-                            "population": city.population
+                            "population": city.population,
+                            "food": city.food,
+                            "production": city.production
                         } for city in civ.cities
                     ],
                     "units": [
@@ -433,14 +711,51 @@ async def get_map_data(game_id: Optional[int] = Query(None, description="게임 
             "currentTurn": turn_snapshot.turnNumber
         }
         
+        # TurnSnapshot에서 플레이어 재화 정보 가져오기
+        try:
+            player_resources = getattr(turn_snapshot, 'playerResources', None)
+        except AttributeError:
+            # playerResources 속성이 없는 경우
+            player_resources = None
+        
+        # 플레이어 재화 정보가 없는 경우 계산
+        if not player_resources and player_civ:
+            # 플레이어 도시들의 식량과 생산력 정보 계산
+            total_food = 0
+            total_production = 0
+            
+            for city in player_civ.cities:
+                total_food += city.food
+                total_production += city.production
+            
+            # 플레이어 재화 정보 구성
+            player_resources = {
+                "gold": player_civ.gold,
+                "science": player_civ.science,
+                "culture": player_civ.culture,
+                "food": total_food,
+                "production": total_production
+            }
+            
+            # TurnSnapshot 업데이트 시도 - 에러 무시
+            try:
+                await prisma.turnsnapshot.update(
+                    where={"id": turn_snapshot.id},
+                    data={"playerResources": player_resources}
+                )
+            except Exception as update_error:
+                print(f"TurnSnapshot 업데이트 중 오류: {str(update_error)}")
+        
         return {
             "success": True,
             "status_code": 200,
             "message": f"턴 {turn_snapshot.turnNumber}의 게임 상태를 조회했습니다.",
             "data": game_state,
+            "player_resources": player_resources,
             "meta": {
                 "game_id": game_id,
                 "turn": turn_snapshot.turnNumber,
+                "year": turn_snapshot.year,
                 "createdAt": turn_snapshot.createdAt.isoformat()
             }
         }

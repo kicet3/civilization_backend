@@ -14,6 +14,8 @@ model Game {
   mapRadius     Int
   turnLimit     Int
   userName      String         @db.VarChar(100)
+  year          Int            @default(1000) // 1턴의 연도
+  currentTurn   Int            @default(1)    // 현재 턴 번호
   gameCivs      GameCiv[]
   mapTiles      MapTile[]
   turnSnapshots TurnSnapshot[]
@@ -39,6 +41,7 @@ model GameCiv {
   production        Int                 @default(0)
   gold              Int                 @default(30)
   science           Int                 @default(5)
+  culture           Int                 @default(0)
   adviceRequests    AdviceRequest[]
   cities            City[]
   receivedSessions  DiplomacySession[]  @relation("TargetCiv")
@@ -278,14 +281,19 @@ model AdviceRequest {
 }
 
 model TurnSnapshot {
+  year Int // 턴의 연도
   id              BigInt   @id @default(autoincrement())
   civId           BigInt
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
   diplomacyState  Json
   gameId          BigInt
   observedMap     Json
   productionState Json
   researchState   Json
+  resourceState   Json?
+  stateData       Json?
+  playerResources Json?
   turnNumber      Int
   game            Game     @relation(fields: [gameId], references: [id])
 

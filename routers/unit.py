@@ -373,11 +373,11 @@ async def get_production_queue(city_id: int = Path(..., description="도시 ID")
             where={
                 "cityId": city_id,
                 "itemType": "unit"
-            },
-            order_by={
-                "queueOrder": "asc"
             }
         )
+        
+        # 결과를 queueOrder를 기준으로 수동 정렬
+        production_queue = sorted(production_queue, key=lambda item: item.queueOrder if hasattr(item, 'queueOrder') else 0)
         
         # 결과 변환
         queue_items = []

@@ -40,7 +40,7 @@ logging.basicConfig(
 )
 
 # 라우터 등록
-app.include_router(game.router, prefix="/game", tags=["Game"])
+app.include_router(game.router, prefix="/games", tags=["Game"])
 app.include_router(map.router, prefix="/map", tags=["Map"])
 app.include_router(unit.router, prefix="/units", tags=["Units"])
 app.include_router(research.router, prefix="/technologies", tags=["Technologies"])
